@@ -3,14 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Media Tracker</title>
+    <title>Show Tracker</title>
     <style>
         :root {
             --bg-color: #121212;
             --card-bg: #1e1e1e;
+            --fav-bg: #1b2838;
             --accent-color: #00adb5;
             --text-color: #eeeeee;
             --subtext-color: #aaaaaa;
+            --star-color: #ffc107;
         }
 
         body {
@@ -28,19 +30,23 @@
             max-width: 800px;
         }
 
-        h1 {
-            text-align: center;
+        h1, h2 {
             color: var(--accent-color);
         }
 
-        .api-setup, .search-box {
+        h2 {
+            border-bottom: 2px solid #2a2a2a;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+
+        .search-box {
             background-color: var(--card-bg);
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 20px;
             display: flex;
             gap: 10px;
-            align-items: center;
         }
 
         input {
@@ -54,24 +60,38 @@
         }
 
         button {
-            padding: 10px 20px;
+            padding: 10px 16px;
             border: none;
             border-radius: 4px;
             background-color: var(--accent-color);
             color: white;
-            font-size: 16px;
+            font-size: 14px;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: opacity 0.2s;
         }
 
         button:hover {
             opacity: 0.9;
         }
 
-        .results-list {
+        .btn-fav {
+            background-color: #333;
+            color: var(--star-color);
+            font-size: 16px;
+        }
+
+        .btn-fav.active {
+            background-color: #4a3e00;
+        }
+
+        .btn-danger {
+            background-color: #d9534f;
+        }
+
+        .grid-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 15px;
         }
 
         .card {
@@ -81,11 +101,18 @@
             display: flex;
             gap: 15px;
             align-items: flex-start;
+            position: relative;
+        }
+
+        .card.fav-card {
+            background-color: var(--fav-bg);
+            border: 1px solid #00adb544;
         }
 
         .card img {
-            width: 80px;
+            width: 90px;
             border-radius: 4px;
+            object-fit: cover;
         }
 
         .card-details {
@@ -96,6 +123,9 @@
             font-size: 18px;
             font-weight: bold;
             margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .meta {
@@ -113,6 +143,15 @@
             margin-right: 5px;
         }
 
+        .status-box {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #16222f;
+            border-left: 4px solid var(--accent-color);
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
         .summary-box {
             background-color: #252525;
             padding: 12px;
@@ -126,189 +165,192 @@
             display: block;
         }
 
-        .next-ep-box {
-            margin-top: 8px;
-            padding: 8px;
-            background-color: #1a3738;
-            border-left: 4px solid var(--accent-color);
-            border-radius: 4px;
-            font-size: 13px;
+        .empty-text {
+            color: var(--subtext-color);
+            font-style: italic;
         }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎬 Media Tracker</h1>
-
-    <!-- API Key Input -->
-    <div class="api-setup">
-        <input type="password" id="apiKey" placeholder="Enter your TMDb API Key (v3)...">
-        <button onclick="saveApiKey()">Save Key</button>
-    </div>
+    <h1>📺 TV Show Tracker</h1>
 
     <!-- Search Section -->
     <div class="search-box">
-        <input type="text" id="searchQuery" placeholder="Search for a movie or TV show..." onkeypress="handleKeyPress(event)">
-        <button onclick="searchMedia()">Search</button>
+        <input type="text" id="searchQuery" placeholder="Search for a TV show..." onkeypress="handleKeyPress(event)">
+        <button onclick="searchShows()">Search</button>
     </div>
 
-    <!-- Search Results Container -->
-    <div id="results" class="results-list"></div>
+    <!-- Favorite Shows / Main Dashboard -->
+    <h2>⭐ Tracked Favorites</h2>
+    <div id="favoritesList" class="grid-list">
+        <p class="empty-text">No shows saved to your favorites yet. Search below to add some!</p>
+    </div>
+
+    <!-- Search Results -->
+    <h2>🔍 Search Results</h2>
+    <div id="searchResults" class="grid-list">
+        <p class="empty-text">Search for a show above to display results.</p>
+    </div>
 </div>
 
 <script>
-    // Initialize API Key on page load
+    // Load tracked favorites when the page loads
     document.addEventListener("DOMContentLoaded", () => {
-        const savedKey = localStorage.getItem("tmdb_api_key");
-        if (savedKey) {
-            document.getElementById("apiKey").value = savedKey;
-        }
+        loadFavorites();
     });
 
-    function saveApiKey() {
-        const key = document.getElementById("apiKey").value.trim();
-        if (key) {
-            localStorage.setItem("tmdb_api_key", key);
-            alert("API Key saved locally!");
-        } else {
-            alert("Please enter a valid key.");
-        }
-    }
-
-    function getApiKey() {
-        return localStorage.getItem("tmdb_api_key") || document.getElementById("apiKey").value.trim();
-    }
-
     function handleKeyPress(e) {
-        if (e.key === 'Enter') searchMedia();
+        if (e.key === 'Enter') searchShows();
     }
 
-    async function searchMedia() {
-        const apiKey = getApiKey();
-        const query = document.getElementById("searchQuery").value.trim();
-        const resultsContainer = document.getElementById("results");
+    // --- FAVORITES MANAGEMENT ---
+    function getFavorites() {
+        return JSON.parse(localStorage.getItem("tracked_shows") || "[]");
+    }
 
-        if (!apiKey) {
-            alert("Please provide a TMDb API Key first.");
+    function isFavorite(showId) {
+        const favs = getFavorites();
+        return favs.some(show => show.id === showId);
+    }
+
+    function toggleFavorite(show) {
+        let favs = getFavorites();
+        if (isFavorite(show.id)) {
+            favs = favs.filter(item => item.id !== show.id);
+        } else {
+            favs.push(show);
+        }
+        localStorage.setItem("tracked_shows", JSON.stringify(favs));
+        
+        // Refresh UI
+        loadFavorites();
+        const searchInput = document.getElementById("searchQuery").value.trim();
+        if (searchInput) searchShows(); 
+    }
+
+    async function loadFavorites() {
+        const favsContainer = document.getElementById("favoritesList");
+        const favs = getFavorites();
+
+        if (favs.length === 0) {
+            favsContainer.innerHTML = `<p class="empty-text">No shows saved to your favorites yet. Search below to add some!</p>`;
             return;
         }
 
+        favsContainer.innerHTML = "<p>Loading tracked status...</p>";
+        
+        let html = "";
+        for (const show of favs) {
+            // Fetch live next/previous episode details from TVMaze
+            const details = await fetchShowDetails(show.id);
+            html += renderShowCard(details, true);
+        }
+        favsContainer.innerHTML = html;
+    }
+
+    // --- TVMAZE API FETCHING ---
+    async function searchShows() {
+        const query = document.getElementById("searchQuery").value.trim();
+        const resultsContainer = document.getElementById("searchResults");
+
         if (!query) return;
 
-        resultsContainer.innerHTML = "<p>Searching...</p>";
+        resultsContainer.innerHTML = "<p>Searching TVMaze...</p>";
 
         try {
-            const res = await fetch(`https://api.themoviedb.org/3/search/multi?api_key=${apiKey}&query=${encodeURIComponent(query)}`);
+            const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`);
             const data = await res.json();
 
             resultsContainer.innerHTML = "";
 
-            if (!data.results || data.results.length === 0) {
-                resultsContainer.innerHTML = "<p>No results found.</p>";
+            if (!data || data.length === 0) {
+                resultsContainer.innerHTML = "<p class='empty-text'>No shows found.</p>";
                 return;
             }
 
-            data.results.forEach(item => {
-                if (item.media_type === "movie" || item.media_type === "tv") {
-                    renderCard(item);
-                }
-            });
+            for (const item of data) {
+                const show = item.show;
+                const fullDetails = await fetchShowDetails(show.id);
+                resultsContainer.innerHTML += renderShowCard(fullDetails, false);
+            }
         } catch (err) {
-            resultsContainer.innerHTML = `<p style="color: red;">Error fetching results: ${err.message}</p>`;
+            resultsContainer.innerHTML = `<p style="color: red;">Error searching shows: ${err.message}</p>`;
         }
     }
 
-    function renderCard(item) {
-        const resultsContainer = document.getElementById("results");
-        const title = item.title || item.name;
-        const year = (item.release_date || item.first_air_date || "").substring(0, 4) || "N/A";
-        const poster = item.poster_path 
-            ? `https://image.tmdb.org/t/p/w185${item.poster_path}` 
-            : 'https://via.placeholder.com/80x120?text=No+Image';
+    async function fetchShowDetails(showId) {
+        const res = await fetch(`https://api.tvmaze.com/shows/${showId}?embed[]=nextepisode&embed[]=previousepisode`);
+        return await res.json();
+    }
 
-        const card = document.createElement("div");
-        card.className = "card";
-        card.innerHTML = `
-            <img src="${poster}" alt="${title}">
-            <div class="card-details">
-                <div class="card-title">${title} (${year})</div>
-                <div class="meta">
-                    <span class="badge">${item.media_type.toUpperCase()}</span>
-                    ⭐ ${item.vote_average ? item.vote_average.toFixed(1) : 'N/A'}/10
+    // --- HTML CARD RENDERING ---
+    function renderShowCard(show, isFavList = false) {
+        const favStatus = isFavorite(show.id);
+        const poster = show.image?.medium || 'https://via.placeholder.com/90x120?text=No+Cover';
+        const rating = show.rating?.average ? `${show.rating.average}/10` : 'N/A';
+        const genres = show.genres?.join(", ") || "N/A";
+        
+        // Compute Next/Final Episode Status
+        let episodeStatusHtml = "";
+        const nextEp = show._embedded?.nextepisode;
+        const prevEp = show._embedded?.previousepisode;
+
+        if (nextEp) {
+            episodeStatusHtml = `📅 <strong>Next Episode:</strong> S${nextEp.season}E${nextEp.number} - "${nextEp.name}" airs on <strong>${nextEp.airdate}</strong>`;
+        } else if (show.status === "Ended") {
+            const finalDate = prevEp ? prevEp.airdate : "Unknown";
+            episodeStatusHtml = `🏁 <strong>Series Ended:</strong> Final episode aired on <strong>${finalDate}</strong>`;
+        } else {
+            const lastAired = prevEp ? `(Last episode: S${prevEp.season}E${prevEp.number} on ${prevEp.airdate})` : "";
+            episodeStatusHtml = `⏳ <strong>Status:</strong> ${show.status} ${lastAired}`;
+        }
+
+        // Clean up plot description summary (remove HTML tags returned by API)
+        const cleanSummary = show.summary ? show.summary.replace(/<[^>]*>?/gm, '') : 'No overview available.';
+
+        // Prepare show object to pass into toggle function
+        const showData = JSON.stringify({
+            id: show.id,
+            name: show.name
+        }).replace(/"/g, '&quot;');
+
+        return `
+            <div class="card ${isFavList ? 'fav-card' : ''}">
+                <img src="${poster}" alt="${show.name}">
+                <div class="card-details">
+                    <div class="card-title">
+                        <span>${show.name}</span>
+                        <button class="btn-fav ${favStatus ? 'active' : ''}" onclick="toggleFavorite(${showData})">
+                            ${favStatus ? '★ Saved' : '☆ Track Show'}
+                        </button>
+                    </div>
+                    <div class="meta">
+                        <span class="badge">⭐ ${rating}</span>
+                        <span class="badge">${show.status}</span>
+                        <span>${genres}</span>
+                    </div>
+
+                    <div class="status-box">
+                        ${episodeStatusHtml}
+                    </div>
+
+                    <button style="margin-top: 10px;" onclick="toggleDetails(${show.id})">Toggle Details</button>
+
+                    <div class="summary-box" id="summary-${show.id}">
+                        <p><strong>Plot:</strong> ${cleanSummary}</p>
+                        <p><strong>Network / Platform:</strong> ${show.network?.name || show.webChannel?.name || 'N/A'}</p>
+                        <p><strong>Official Site:</strong> ${show.officialSite ? `<a href="${show.officialSite}" target="_blank" style="color:var(--accent-color)">Visit Webpage</a>` : 'N/A'}</p>
+                    </div>
                 </div>
-                <button onclick="toggleSummary('${item.media_type}', ${item.id}, this)">Show Details & Providers</button>
-                <div class="summary-box" id="summary-${item.media_type}-${item.id}"></div>
             </div>
         `;
-        resultsContainer.appendChild(card);
     }
 
-    async function toggleSummary(mediaType, id, btn) {
-        const apiKey = getApiKey();
-        const summaryBox = document.getElementById(`summary-${mediaType}-${id}`);
-
-        if (summaryBox.classList.contains("active")) {
-            summaryBox.classList.remove("active");
-            btn.innerText = "Show Details & Providers";
-            return;
-        }
-
-        summaryBox.innerHTML = "Loading details...";
-        summaryBox.classList.add("active");
-        btn.innerText = "Hide Details";
-
-        try {
-            const res = await fetch(`https://api.themoviedb.org/3/${mediaType}/${id}?api_key=${apiKey}&append_to_response=external_ids,watch/providers`);
-            const details = await res.json();
-
-            // Extract Streaming Providers (US Region default)
-            const providersData = details['watch/providers']?.results?.US?.flatrate || [];
-            const providers = providersData.length > 0 
-                ? providersData.map(p => p.provider_name).join(", ") 
-                : "None (Check Rent/Buy)";
-
-            const imdbId = details.external_ids?.imdb_id;
-            const imdbLink = imdbId ? `<a href="https://www.imdb.com/title/${imdbId}/" target="_blank" style="color: var(--accent-color);">IMDb Page</a>` : "N/A";
-
-            let extraFields = "";
-            let nextEpHtml = "";
-
-            if (mediaType === "tv") {
-                extraFields = `
-                    <p><strong>Total Seasons:</strong> ${details.number_of_seasons} | <strong>Total Episodes:</strong> ${details.number_of_episodes}</p>
-                `;
-
-                if (details.last_episode_to_air) {
-                    const last = details.last_episode_to_air;
-                    extraFields += `<p><strong>Most Recent Episode:</strong> S${last.season_number}E${last.episode_number} - "${last.name}" (Aired: ${last.air_date})</p>`;
-                }
-
-                // Calculate Next Episode status
-                let epStatusText = "";
-                if (details.next_episode_to_air) {
-                    const next = details.next_episode_to_air;
-                    epStatusText = `📅 <strong>Next Episode:</strong> S${next.season_number}E${next.episode_number} airs on <strong>${next.air_date}</strong>`;
-                } else if (["Ended", "Canceled"].includes(details.status)) {
-                    const lastDate = details.last_episode_to_air?.air_date || "Unknown";
-                    epStatusText = `🏁 <strong>Series ${details.status}:</strong> Final episode aired on <strong>${lastDate}</strong>`;
-                } else {
-                    epStatusText = `⏳ <strong>Status:</strong> ${details.status} (Next episode date unannounced)`;
-                }
-
-                nextEpHtml = `<div class="next-ep-box">${epStatusText}</div>`;
-            }
-
-            summaryBox.innerHTML = `
-                <p><strong>Plot:</strong> ${details.overview || "No overview available."}</p>
-                <p><strong>Streaming On (US):</strong> ${providers}</p>
-                <p><strong>IMDb Link:</strong> ${imdbLink}</p>
-                ${extraFields}
-                ${nextEpHtml}
-            `;
-        } catch (err) {
-            summaryBox.innerHTML = `<p style="color: red;">Failed to load details.</p>`;
-        }
+    function toggleDetails(id) {
+        const box = document.getElementById(`summary-${id}`);
+        box.classList.toggle("active");
     }
 </script>
 
