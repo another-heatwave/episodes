@@ -49,14 +49,17 @@
             gap: 10px;
         }
 
-        input {
-            flex: 1;
+        input, select {
             padding: 10px;
             border-radius: 4px;
             border: 1px solid #333;
             background-color: #2a2a2a;
             color: var(--text-color);
-            font-size: 16px;
+            font-size: 15px;
+        }
+
+        input {
+            flex: 1;
         }
 
         button {
@@ -84,10 +87,6 @@
             background-color: #4a3e00;
         }
 
-        .btn-danger {
-            background-color: #d9534f;
-        }
-
         .grid-list {
             display: flex;
             flex-direction: column;
@@ -101,7 +100,6 @@
             display: flex;
             gap: 15px;
             align-items: flex-start;
-            position: relative;
         }
 
         .card.fav-card {
@@ -165,6 +163,50 @@
             display: block;
         }
 
+        /* --- EPISODE SECTION STYLES --- */
+        .season-selector-container {
+            margin: 15px 0 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .episode-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 350px;
+            overflow-y: auto;
+            padding-right: 5px;
+            margin-top: 10px;
+        }
+
+        .episode-item {
+            background-color: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 3px solid #444;
+        }
+
+        .episode-header {
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            color: var(--accent-color);
+            margin-bottom: 4px;
+        }
+
+        .episode-date {
+            font-size: 12px;
+            color: var(--subtext-color);
+        }
+
+        .episode-summary {
+            font-size: 13px;
+            color: #ccc;
+            margin-top: 4px;
+        }
+
         .empty-text {
             color: var(--subtext-color);
             font-style: italic;
@@ -196,7 +238,9 @@
 </div>
 
 <script>
-    // Load tracked favorites when the page loads
+    // Cache episode data in memory to avoid redundant API calls
+    const episodeCache = {};
+
     document.addEventListener("DOMContentLoaded", () => {
         loadFavorites();
     });
@@ -211,8 +255,7 @@
     }
 
     function isFavorite(showId) {
-        const favs = getFavorites();
-        return favs.some(show => show.id === showId);
+        return getFavorites().some(show => show.id === showId);
     }
 
     function toggleFavorite(show) {
@@ -224,7 +267,6 @@
         }
         localStorage.setItem("tracked_shows", JSON.stringify(favs));
         
-        // Refresh UI
         loadFavorites();
         const searchInput = document.getElementById("searchQuery").value.trim();
         if (searchInput) searchShows(); 
@@ -243,7 +285,6 @@
         
         let html = "";
         for (const show of favs) {
-            // Fetch live next/previous episode details from TVMaze
             const details = await fetchShowDetails(show.id);
             html += renderShowCard(details, true);
         }
@@ -271,8 +312,7 @@
             }
 
             for (const item of data) {
-                const show = item.show;
-                const fullDetails = await fetchShowDetails(show.id);
+                const fullDetails = await fetchShowDetails(item.show.id);
                 resultsContainer.innerHTML += renderShowCard(fullDetails, false);
             }
         } catch (err) {
@@ -285,14 +325,13 @@
         return await res.json();
     }
 
-    // --- HTML CARD RENDERING ---
+    // --- CARD RENDERING ---
     function renderShowCard(show, isFavList = false) {
         const favStatus = isFavorite(show.id);
         const poster = show.image?.medium || 'https://via.placeholder.com/90x120?text=No+Cover';
         const rating = show.rating?.average ? `${show.rating.average}/10` : 'N/A';
         const genres = show.genres?.join(", ") || "N/A";
         
-        // Compute Next/Final Episode Status
         let episodeStatusHtml = "";
         const nextEp = show._embedded?.nextepisode;
         const prevEp = show._embedded?.previousepisode;
@@ -307,14 +346,8 @@
             episodeStatusHtml = `⏳ <strong>Status:</strong> ${show.status} ${lastAired}`;
         }
 
-        // Clean up plot description summary (remove HTML tags returned by API)
         const cleanSummary = show.summary ? show.summary.replace(/<[^>]*>?/gm, '') : 'No overview available.';
-
-        // Prepare show object to pass into toggle function
-        const showData = JSON.stringify({
-            id: show.id,
-            name: show.name
-        }).replace(/"/g, '&quot;');
+        const showData = JSON.stringify({ id: show.id, name: show.name }).replace(/"/g, '&quot;');
 
         return `
             <div class="card ${isFavList ? 'fav-card' : ''}">
@@ -336,21 +369,98 @@
                         ${episodeStatusHtml}
                     </div>
 
-                    <button style="margin-top: 10px;" onclick="toggleDetails(${show.id})">Toggle Details</button>
+                    <button style="margin-top: 10px;" onclick="toggleDetails(${show.id})">Toggle Details & Episodes</button>
 
                     <div class="summary-box" id="summary-${show.id}">
                         <p><strong>Plot:</strong> ${cleanSummary}</p>
                         <p><strong>Network / Platform:</strong> ${show.network?.name || show.webChannel?.name || 'N/A'}</p>
                         <p><strong>Official Site:</strong> ${show.officialSite ? `<a href="${show.officialSite}" target="_blank" style="color:var(--accent-color)">Visit Webpage</a>` : 'N/A'}</p>
+                        
+                        <!-- EPISODE LIST SECTION -->
+                        <hr style="border: 0; border-top: 1px solid #333; margin: 15px 0;">
+                        <div class="season-selector-container">
+                            <label for="season-select-${show.id}"><strong>Season:</strong></label>
+                            <select id="season-select-${show.id}" onchange="renderSeasonEpisodes(${show.id}, this.value)">
+                                <option value="">Loading seasons...</option>
+                            </select>
+                        </div>
+                        <div id="episodes-container-${show.id}" class="episode-list"></div>
                     </div>
                 </div>
             </div>
         `;
     }
 
-    function toggleDetails(id) {
+    // --- EPISODE LIST & SEASON SELECTOR LOGIC ---
+    async function toggleDetails(id) {
         const box = document.getElementById(`summary-${id}`);
         box.classList.toggle("active");
+
+        // Fetch episode catalog if expanding and not already cached
+        if (box.classList.contains("active") && !episodeCache[id]) {
+            await loadEpisodes(id);
+        }
+    }
+
+    async function loadEpisodes(showId) {
+        const selectElem = document.getElementById(`season-select-${showId}`);
+        const containerElem = document.getElementById(`episodes-container-${showId}`);
+
+        try {
+            const res = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`);
+            const episodes = await res.json();
+            
+            // Cache episode array
+            episodeCache[showId] = episodes;
+
+            // Extract unique season numbers
+            const seasons = [...new Set(episodes.map(ep => ep.season))].sort((a, b) => a - b);
+            
+            selectElem.innerHTML = "";
+            seasons.forEach(season => {
+                const option = document.createElement("option");
+                option.value = season;
+                option.textContent = `Season ${season}`;
+                selectElem.appendChild(option);
+            });
+
+            // Default to rendering Season 1
+            if (seasons.length > 0) {
+                renderSeasonEpisodes(showId, seasons[0]);
+            } else {
+                containerElem.innerHTML = "<p class='empty-text'>No episode information found.</p>";
+            }
+        } catch (err) {
+            selectElem.innerHTML = "<option value=''>Error loading seasons</option>";
+            containerElem.innerHTML = `<p style="color:red;">Failed to load episodes: ${err.message}</p>`;
+        }
+    }
+
+    function renderSeasonEpisodes(showId, seasonNumber) {
+        const containerElem = document.getElementById(`episodes-container-${showId}`);
+        const episodes = episodeCache[showId] || [];
+        
+        const seasonEpisodes = episodes.filter(ep => ep.season == seasonNumber);
+
+        if (seasonEpisodes.length === 0) {
+            containerElem.innerHTML = "<p class='empty-text'>No episodes found for this season.</p>";
+            return;
+        }
+
+        containerElem.innerHTML = seasonEpisodes.map(ep => {
+            const cleanSummary = ep.summary ? ep.summary.replace(/<[^>]*>?/gm, '') : 'No summary available.';
+            const airdate = ep.airdate ? ep.airdate : 'Airdate TBA';
+
+            return `
+                <div class="episode-item">
+                    <div class="episode-header">
+                        <span>E${ep.number} - ${ep.name}</span>
+                        <span class="episode-date">📅 ${airdate}</span>
+                    </div>
+                    <div class="episode-summary">${cleanSummary}</div>
+                </div>
+            `;
+        }).join("");
     }
 </script>
 
